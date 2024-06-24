@@ -1,4 +1,6 @@
-#load("myenviron.RData")
+
+```{r}
+load("myenviron.RData")
 # Als erstes: Die Dateien sind im FIT Format: wir brauchen das Package FITfileR
 # Install and load necessary libraries
 if (!requireNamespace("rnaturalearth", quietly = TRUE)) {
@@ -194,17 +196,8 @@ filtered_data <- st_intersection(combined_data_sf_lv95, swiss_boundary)
 filtered_data <- filtered_data[, c("timestamp", "distance", "speed", "altitude", "geometry")]
 
 # Zeige die gefilterten Daten auf einer Karte an
-
-library(rnaturalearth)
-tmap_mode("plot")
-
-ch <- rnaturalearth::ne_countries(scale = 50, country = "Switzerland")
-
-tm_shape(ch) + tm_polygons() +
-  tm_shape(filtered_data)  +tm_dots()
-
-
-#tm_shape(filtered_data)  +tm_dots()+ tmap_mode("plot")
+plot(filtered_data)
+tm_shape(filtered_data)  +tm_dots()+ tmap_mode("view")
 
 # Zähle die Anzahl der Trainings-Tage
 filtered_data$timestamp <- as.POSIXct(filtered_data$timestamp)
@@ -243,29 +236,21 @@ filtered_data <- filtered_data %>%
 
 
 # Initialisieren von cumulative_distance und run
-#filtered_data$cumulative_distance <- 0
-
+filtered_data$cumulative_distance <- 0
+filtered_data$run <- 1
 
 # Iterieren durch die Zeilen und Aktualisieren von cumulative_distance
 ### Es braucht 1h oder 1.5 h ######################################
 # Der Abstand zwischen den Punkten weicht leicht von den von STRAVA importierten Abstandswerten ab. Der Grund dafür liegt wahrscheinlich in den unterschiedlichen Koordinatensystemen. Jetzt wird der Abstand mit dem LV95-System neu berechnet.
-
-rle_id <- function(vec) {
-  x <- rle(vec)$lengths
-  as.factor(rep(seq_along(x), times = x))
+for (i in 2:nrow(filtered_data)) {
+  if (difftime_secs(filtered_data$timestamp[i], filtered_data$timestamp[i-1]) > 1800) {
+    filtered_data$cumulative_distance[i] <- 0
+    filtered_data$run[i] <- filtered_data$run[i-1] + 1
+  } else {
+    filtered_data$cumulative_distance[i] <- filtered_data$cumulative_distance[i-1] + distance_by_element(filtered_data$geometry[i], filtered_data$geometry[i-1])
+    filtered_data$run[i] <- filtered_data$run[i-1]
+  }
 }
-
-filtered_data <- filtered_data |> 
-  mutate(
-    timediff = difftime_secs(lead(timestamp), timestamp),
-    timediff_large = timediff > 1800,
-    run_id = rle_id(timediff_large)
-  ) |> 
-  group_by(run_id) |> 
-  mutate(
-    distance = distance_by_element(lead(geometry), geometry),
-    cumulative_distance = cumsum(distance)
-  )
 
 # Spalten für Steplength, Höhenänderung und Steigungsprozent hinzufügen
 filtered_data <- filtered_data %>%
@@ -280,7 +265,7 @@ filtered_data <- filtered_data %>%
 
 # Segmente von 300 Metern innerhalb jedes Laufs nummerieren
 filtered_data <- filtered_data %>%
-  group_by(run_id) %>%
+  group_by(run) %>%
   mutate(
     segment = floor(cumulative_distance / 300) + 1
   ) %>%
@@ -288,7 +273,7 @@ filtered_data <- filtered_data %>%
 
 # Zeilen zusammenführen, die zum gleichen Lauf und Segment gehören, und die erforderlichen Metriken berechnen
 segment_summary <- filtered_data %>%
-  group_by(run_id, segment) %>%
+  group_by(run, segment) %>%
   summarize(
     start_time = min(timestamp),
     end_time = max(timestamp),
@@ -357,13 +342,11 @@ table1 <- st_drop_geometry(summary_stats1)
 table1 <- kable(table1, caption = "Zusammenfassung der Geschwindigkeit über Steigungskategorien") %>%
   kable_styling(bootstrap_options = "striped", full_width = F)
 
-print(table1)
-
 ##################################################################################################
 # Fragenstellung 2
 # Berechnen der Gesamtanzahl der Segmente für jeden Lauf
 segment_summary_run <- segment_summary_run %>%
-  group_by(run_id) %>%
+  group_by(run) %>%
   mutate(total_segments = max(segment)) %>%
   ungroup()
 
@@ -380,6 +363,8 @@ segment_summary_run <- segment_summary_run %>%
   select(-total_segments)  # Entfernen der temporären Spalte total_segments
 
 # Nun enthält segment_summary_run eine neue Spalte 'phase', die anzeigt, ob sich jedes Segment am Anfang, in der Mitte oder am Ende des Trainings für jede Steigungskategorie (slope_category) befindet.
+
+library(ggplot2)
 
 
 # Berechnung der Durchschnittsgeschwindigkeit für jede Kombination aus slope_category und phase
@@ -423,3 +408,5 @@ table2 <- kable(table2, caption = "Zusammenfassung der Geschwindigkeit nach Stei
   kable_styling(bootstrap_options = "striped", full_width = F)
 
 save.image(file = "meine_Umgebung.RData")
+```
+
